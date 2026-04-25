@@ -130,7 +130,7 @@ Resolution rule: incident resolves only after all 3 root causes are diagnosed AN
 
 ---
 
-## 4. NEW Scenario 6 — `procedural-incident` (seeded generator)
+## 4. Scenario 6 — `procedural-incident` (seeded generator, shipped in Issue #8)
 
 Infinite unique incidents from a deterministic seed. Turns Praxis from "4 tasks" into "∞ tasks" — the production training asset.
 

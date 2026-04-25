@@ -64,6 +64,8 @@ Add `save_finding` and `recall_memory` as agent-callable commands. After step 30
 
 This is the **moat**. The frontier paper (S29) says passive summarisation by the framework fails because the agent never had a chance to express what it considered important. AgeMem (S28) shows GRPO trains naturally on memory-as-tool. Praxis ships exactly this.
 
+Implementation cross-link: `praxis_env/memory.py` (Issue #3). Cutoff behavior details live in [`MemoryModel.md`](../Architecture/MemoryModel.md) §3.
+
 Alternatives considered:
 
 - **SUPO-style automatic summarisation (S22)** — rejected: same failure mode as S29; also would dilute the moat ("nobody else has memory-as-tool").
@@ -155,6 +157,7 @@ Why now: with sparse rewards added in this hackathon push, "diagnose-before-reme
 Implementation:
 
 - `server/reward.py` (Issue #5): `RewardEngine.score(...)` checks `event.startswith("remediation.")` and returns `RewardResult(reward=clamp_reward(0.0), ...)` when `root_cause_identified=False`. New unit test row per task in `tests/test_reward.py::test_remediation_requires_diagnosis`.
+- `tests/test_reward.py` (Issue #5): verifies all default policies include the 6 cross-task memory event tags and includes a 1000-sequence clamp sweep to keep scores within `[0.01, 0.99]`.
 - `MegaIncidentScenario.step` (Issue #7) and `ProceduralIncidentScenario.step` (Issue #8): same guard in the scenario layer for defense-in-depth.
 - Tests (Issue #14): `test_remediation_before_diagnosis_scores_zero` runs against both new scenarios + 3 procedural difficulties.
 
@@ -186,6 +189,16 @@ Alternatives considered:
 - **Embed the scores into `/metadata`** — rejected: pollutes the metadata surface that the OpenEnv runtime validator depends on (S14, S18).
 
 Trade-off accepted: small duplication with `/metadata` (which lists tasks) and `docs/baseline_scores.md` (which is the source of truth). Worth it for the discoverability win.
+
+---
+
+## ADR-15 — Procedural generator shipped with diagnosis gate (NEW)
+
+**Date**: 2026-04-25 · **Status**: Accepted · **Issue**: #8 · **Source**: ADR-07, ADR-13, `tests/test_task6_procedural.py`.
+
+Issue #8 ships the `procedural-incident` scenario from ADR-07 as a seeded deterministic generator with difficulty tiers (`easy`/`medium`/`hard`) and runtime-stamped `MAX_STEPS` + `MEMORY_CUTOFF_OVERRIDE`.
+
+Cross-link to ADR-13: the new scenario enforces a hard evidence gate where remediation attempts before diagnosis score zero (clamped at the shared floor in emitted rewards), with explicit tests across all three procedural difficulties.
 
 ---
 

@@ -91,6 +91,8 @@ Key invariants:
 
 ## 3. Step flow (with memory branch)
 
+Status: shipped in Issue #6 (`server/praxis_environment.py` + `server/session_manager.py`).
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -116,6 +118,9 @@ sequenceDiagram
         PE->>M: save / recall
         PE->>RE: score(memory.save_finding.<cutoff_state>) or<br/>score(memory.recall_memory.<cutoff_state>)
         M-->>PE: result_text
+    else action_type in {query_logs, check_logs} and step >= cutoff
+        PE->>RE: score(memory.illegal_log_after_cutoff)
+        PE-->>PE: append [CONTEXT LIMIT] marker to result text
     else scenario action
         PE->>SC: step(parsed)
         SC->>RE: _score_event(event)

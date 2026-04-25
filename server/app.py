@@ -134,6 +134,11 @@ def create_app() -> FastAPI:
                 {"name": "ambiguous-incident", "difficulty": "medium", "max_steps": 25},
                 {"name": "cascading-failure", "difficulty": "hard", "max_steps": 20},
                 {"name": "memory-leak", "difficulty": "hard", "max_steps": 25},
+                {
+                    "name": "procedural-incident",
+                    "difficulty": "medium",
+                    "max_steps": 25,
+                },
             ],
             "endpoints": {
                 "reset": "/reset",
@@ -204,7 +209,16 @@ def create_app() -> FastAPI:
                     data.get("task_name", "single-service-alert")
                     or "single-service-alert"
                 )
-                seed = data.get("seed")
+                raw_seed = data.get("seed")
+                if raw_seed is not None:
+                    if isinstance(raw_seed, bool) or not isinstance(raw_seed, int):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Invalid seed: expected integer",
+                        )
+                    seed = raw_seed
+        except HTTPException:
+            raise
         except Exception:
             pass  # no body or invalid JSON — use default task
 
@@ -216,6 +230,7 @@ def create_app() -> FastAPI:
             return {
                 "session_id": allocation.session.session_id,
                 "observation": obs_dict,
+                "metadata": allocation.metadata,
                 **obs_dict,
             }
         except ValueError as e:
@@ -265,6 +280,7 @@ def create_app() -> FastAPI:
                 "root_cause_identified": s.root_cause_identified,
                 "cumulative_reward": s.cumulative_reward,
                 "session_id": session_id,
+                "memory_active": s.memory_active,
             }
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e))

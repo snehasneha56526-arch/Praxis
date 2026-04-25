@@ -12,6 +12,7 @@ import pytest
 from praxis_env.models import PraxisAction
 from praxis_env.scenarios.ambiguous_incident import AmbiguousIncidentScenario
 from praxis_env.scenarios.cascading_failure import CascadingFailureScenario
+from praxis_env.scenarios.mega_incident import MegaIncidentScenario
 from praxis_env.scenarios.memory_leak_scenario import MemoryLeakScenario
 from praxis_env.scenarios.single_service_alert import SingleServiceAlertScenario
 from server.command_parser import parse_command
@@ -85,6 +86,23 @@ DETERMINISTIC_CASES = [
             "check_metrics service=worker metric=memory",
             "check_config service=worker",
             "diagnose root_cause=large_batch_size_oom",
+            "rollback_deploy service=worker",
+        ],
+    ),
+    (
+        MegaIncidentScenario,
+        [
+            "query_logs service=database timerange=15m",
+            "check_metrics service=database metric=connections",
+            "query_logs service=cdn timerange=15m",
+            "check_metrics service=cdn metric=tls_handshake_failures",
+            "query_logs service=worker timerange=15m",
+            "check_metrics service=worker metric=memory",
+            "diagnose root_cause=db_pool_corrupted",
+            "diagnose root_cause=cdn_tls_expired",
+            "diagnose root_cause=worker_memory_leak",
+            "scale_resource service=database resource=connection_pool",
+            "rollback_deploy service=cdn",
             "rollback_deploy service=worker",
         ],
     ),
@@ -174,6 +192,30 @@ QUALITY_CASES = [
         ],
         0.35,
     ),
+    (
+        MegaIncidentScenario,
+        [
+            "query_logs service=database timerange=15m",
+            "check_metrics service=database metric=connections",
+            "query_logs service=cdn timerange=15m",
+            "check_metrics service=cdn metric=tls_handshake_failures",
+            "query_logs service=worker timerange=15m",
+            "check_metrics service=worker metric=memory",
+            "diagnose root_cause=db_pool_corrupted",
+            "diagnose root_cause=cdn_tls_expired",
+            "diagnose root_cause=worker_memory_leak",
+            "scale_resource service=database resource=connection_pool",
+            "rollback_deploy service=cdn",
+            "rollback_deploy service=worker",
+        ],
+        [
+            "query_logs service=api timerange=10m",
+            "diagnose root_cause=api_deploy",
+            "restart_service service=auth",
+            "escalate reason=unclear",
+        ],
+        0.45,
+    ),
 ]
 
 
@@ -225,6 +267,15 @@ def test_better_path_scores_higher_than_naive_path(
                 "check_metrics service=worker metric=memory",
                 "diagnose root_cause=large_batch_size_oom",
                 "rollback_deploy service=worker",
+            ],
+        ),
+        (
+            "cascading-platform-failure",
+            [
+                "query_logs service=database timerange=15m",
+                "check_metrics service=database metric=connections",
+                "query_logs service=cdn timerange=15m",
+                "diagnose root_cause=db_pool_corrupted",
             ],
         ),
     ],

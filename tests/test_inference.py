@@ -106,6 +106,7 @@ def test_parse_task_list_uses_defaults_for_empty_input():
         "cascading-failure",
         "ambiguous-incident",
         "memory-leak",
+        "cascading-platform-failure",
     ]
 
 
@@ -123,6 +124,7 @@ def test_parse_task_list_falls_back_when_all_invalid():
         "cascading-failure",
         "ambiguous-incident",
         "memory-leak",
+        "cascading-platform-failure",
     ]
 
 

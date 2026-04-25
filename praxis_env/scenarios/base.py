@@ -153,6 +153,8 @@ class BaseScenario(ABC):
                 if self._current_system_status.get(service) != "healthy"
             ],
             step_number=self._step_count,
+            memory_active=False,
+            saved_findings_count=0,
         )
 
     def get_state(self) -> PraxisState:
@@ -164,6 +166,8 @@ class BaseScenario(ABC):
             incident_resolved=self._incident_resolved,
             root_cause_identified=self._root_cause_identified,
             cumulative_reward=self.clamp_reward(self._cumulative_reward),
+            session_id="",
+            memory_active=False,
         )
 
     def is_done(self) -> bool:

@@ -17,6 +17,9 @@ tasks:
   - name: memory-leak
     difficulty: hard
     max_steps: 25
+  - name: cascading-platform-failure
+    difficulty: hard
+    max_steps: 120
 action:
   type: text
   field: command

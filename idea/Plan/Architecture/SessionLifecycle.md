@@ -75,11 +75,13 @@ Calling `/step` against a `done=true` session returns 400 with `detail="Episode 
 session.allocate()
 └── PraxisEnvironment.__init__()
     └── PraxisMemory()                          # empty
-session.allocate() ↦ env.reset(task)
+session.allocate() ↦ env.reset(task, session_id=<uuid4>)
 ├── scenario.reset(episode_id)                   # scenario state cleared
 └── memory.reset()                               # findings cleared
 loop /step
 ├── if action ∈ {save, recall} → mutate memory
+├── if action ∈ {query_logs, check_logs} and cutoff active
+│   └── emit memory.illegal_log_after_cutoff + context-limit marker
 └── observation.investigation_result =
     memory.get_observation_context(history, step)
 session.close() (LRU or explicit)

@@ -8,12 +8,19 @@ If this fails, the environment will NEVER pass openenv validate.
 
 def test_import_praxis_env_package():
     """The public API must be importable."""
-    from praxis_env import PraxisAction, PraxisObservation, PraxisState, PraxisEnv
+    from praxis_env import (
+        PraxisAction,
+        PraxisEnv,
+        PraxisMemory,
+        PraxisObservation,
+        PraxisState,
+    )
 
     assert PraxisAction is not None
     assert PraxisObservation is not None
     assert PraxisState is not None
     assert PraxisEnv is not None
+    assert PraxisMemory is not None
 
 
 def test_import_models_directly():

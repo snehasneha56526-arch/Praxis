@@ -73,6 +73,7 @@ class PraxisEnv:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
+        self._session_id: str = ""
 
     @classmethod
     async def from_url(cls, url: str, timeout: float = 30.0) -> "PraxisEnv":
@@ -102,7 +103,9 @@ class PraxisEnv:
         resp = await self._client.post("/reset", json={"task_name": task_name})
         resp.raise_for_status()
         data = resp.json()
-        return _parse_observation(data)
+        self._session_id = data.get("session_id", "")
+        payload = data.get("observation", data)
+        return _parse_observation(payload)
 
     async def step(self, action: PraxisAction) -> StepResult:
         """
@@ -115,7 +118,11 @@ class PraxisEnv:
             StepResult with observation, reward, done, and info.
         """
         assert self._client is not None, "Call from_url() before using the client"
-        resp = await self._client.post("/step", json={"command": action.command})
+        resp = await self._client.post(
+            "/step",
+            json={"command": action.command},
+            headers=self._session_headers(),
+        )
         resp.raise_for_status()
         data = resp.json()
         return StepResult(
@@ -133,7 +140,7 @@ class PraxisEnv:
             PraxisState with episode_id, step_count, task_name, etc.
         """
         assert self._client is not None, "Call from_url() before using the client"
-        resp = await self._client.get("/state")
+        resp = await self._client.get("/state", headers=self._session_headers())
         resp.raise_for_status()
         data = resp.json()
         return PraxisState(
@@ -143,6 +150,8 @@ class PraxisEnv:
             incident_resolved=data.get("incident_resolved", False),
             root_cause_identified=data.get("root_cause_identified", False),
             cumulative_reward=data.get("cumulative_reward", 0.01),
+            session_id=data.get("session_id", ""),
+            memory_active=data.get("memory_active", False),
         )
 
     async def close(self) -> None:
@@ -150,6 +159,7 @@ class PraxisEnv:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        self._session_id = ""
 
     async def __aenter__(self) -> "PraxisEnv":
         await self._init()
@@ -157,6 +167,12 @@ class PraxisEnv:
 
     async def __aexit__(self, *_: object) -> None:
         await self.close()
+
+    def _session_headers(self) -> dict[str, str]:
+        """Attach session affinity header for stateful server endpoints."""
+        if not self._session_id:
+            return {}
+        return {"x-session-id": self._session_id}
 
 
 def _parse_observation(data: dict) -> PraxisObservation:

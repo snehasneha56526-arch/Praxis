@@ -25,18 +25,21 @@ from __future__ import annotations
 
 import logging
 import math
+import random
 from typing import Any
 
 from praxis_env.models import (
     PraxisAction,
     PraxisObservation,
     PraxisState,
+    StepOutcome,
     ensure_ascii_text,
 )
+from praxis_env.memory import PraxisMemory
 from praxis_env.scenarios import get_scenario, list_tasks
-from praxis_env.scenarios.base import BaseScenario, StepOutcome
+from praxis_env.scenarios.base import BaseScenario
 from server.command_parser import parse_command
-from server.reward import MAX_REWARD, MIN_REWARD
+from server.reward import MAX_REWARD, MIN_REWARD, RewardEngine
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ TASK_NAME_ALIASES: dict[str, str] = {
     "medium": "ambiguous-incident",
     "hard": "cascading-failure",
 }
+PROCEDURAL_DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 
 
 class PraxisEnvironment:
@@ -72,6 +76,11 @@ class PraxisEnvironment:
     def __init__(self) -> None:
         self._scenario: BaseScenario | None = None
         self._episode_count: int = 0
+        self._last_reset_metadata: dict[str, Any] = {}
+        self._memory = PraxisMemory()
+        self._reward_engine = RewardEngine()
+        self._investigation_history: list[str] = []
+        self._session_id: str = ""
 
     @staticmethod
     def resolve_task_name(task_name: str) -> str:
@@ -81,12 +90,38 @@ class PraxisEnvironment:
             normalized = "single-service-alert"
         return TASK_NAME_ALIASES.get(normalized, normalized)
 
+    @staticmethod
+    def resolve_task_request(task_name: str) -> tuple[str, str | None]:
+        """Resolve canonical task name and optional procedural difficulty."""
+        normalized = (task_name or "single-service-alert").strip().lower()
+        if not normalized:
+            normalized = "single-service-alert"
+
+        if normalized.startswith("procedural-incident"):
+            if normalized == "procedural-incident":
+                return "procedural-incident", "medium"
+            if ":" in normalized:
+                _, _, suffix = normalized.partition(":")
+                if suffix in PROCEDURAL_DIFFICULTIES:
+                    return "procedural-incident", suffix
+            if normalized.count("-") >= 2:
+                suffix = normalized.rsplit("-", 1)[-1]
+                if suffix in PROCEDURAL_DIFFICULTIES:
+                    return "procedural-incident", suffix
+
+        return TASK_NAME_ALIASES.get(normalized, normalized), None
+
+    @property
+    def last_reset_metadata(self) -> dict[str, Any]:
+        return dict(self._last_reset_metadata)
+
     # ── Public API (called by FastAPI routes) ─────────────────────────────────
 
     def reset(
         self,
         task_name: str = "single-service-alert",
         seed: int | None = None,
+        session_id: str = "",
     ) -> PraxisObservation:
         """
         Start a new episode with the named scenario.
@@ -101,7 +136,10 @@ class PraxisEnvironment:
         Raises:
             ValueError: if task_name is not registered.
         """
-        canonical_task_name = self.resolve_task_name(task_name)
+        canonical_task_name, procedural_difficulty = self.resolve_task_request(
+            task_name
+        )
+        resolved_seed = seed
 
         self._episode_count += 1
         episode_id = f"{canonical_task_name}_{self._episode_count}"
@@ -111,10 +149,38 @@ class PraxisEnvironment:
             episode_id,
             canonical_task_name,
             task_name,
-            seed,
+            resolved_seed,
         )
 
-        self._scenario = get_scenario(canonical_task_name)
+        if canonical_task_name == "procedural-incident":
+            if resolved_seed is None:
+                resolved_seed = random.randint(0, 2**31 - 1)
+            self._scenario = get_scenario(
+                canonical_task_name,
+                seed=resolved_seed,
+                difficulty=procedural_difficulty,
+            )
+        else:
+            self._scenario = get_scenario(canonical_task_name)
+
+        self._last_reset_metadata = {
+            "seed": resolved_seed,
+            "difficulty": (
+                procedural_difficulty
+                if canonical_task_name == "procedural-incident"
+                else None
+            ),
+            "task_name": canonical_task_name,
+        }
+        cutoff = getattr(
+            self._scenario,
+            "MEMORY_CUTOFF_OVERRIDE",
+            PraxisMemory.CONTEXT_CUTOFF_STEP,
+        )
+        self._memory.CONTEXT_CUTOFF_STEP = int(cutoff)
+        self._memory.reset()
+        self._investigation_history = []
+        self._session_id = session_id
         self._scenario.reset(episode_id=episode_id)
 
         obs = self._scenario.get_observation()
@@ -122,6 +188,8 @@ class PraxisEnvironment:
         obs.investigation_result = ensure_ascii_text(
             self._scenario.get_initial_observation_text()
         )
+        obs.memory_active = self._memory.is_active(self._scenario._step_count)
+        obs.saved_findings_count = len(self._memory.saved_findings)
         return obs
 
     def step(self, action: PraxisAction) -> dict[str, Any]:
@@ -160,9 +228,34 @@ class PraxisEnvironment:
         # Scenarios return domain outcomes without mutating those counters.
         # Parse command string -> structured ParsedCommand
         parsed = parse_command(action.command)
+        current_step = self._scenario._step_count
+        reward_event: str | None = None
 
-        # Delegate to active scenario
-        outcome: StepOutcome = self._scenario.step(parsed)
+        if parsed.action_type in {"save_finding", "recall_memory"}:
+            outcome, reward_event = self._handle_memory_action(
+                parsed.action_type, parsed.params
+            )
+        elif (
+            parsed.action_type in {"query_logs", "check_logs"}
+            and current_step >= self._memory.CONTEXT_CUTOFF_STEP
+        ):
+            reward_event = "memory.illegal_log_after_cutoff"
+            result_text = (
+                "Log access is disabled after context cutoff.\n"
+                "[CONTEXT LIMIT] Use save_finding and recall_memory instead."
+            )
+            reward = self._score_memory_event(reward_event)
+            outcome = StepOutcome(
+                investigation_result=result_text,
+                reward=reward,
+                done=self._scenario.is_done(),
+                incident_resolved=self._scenario._incident_resolved,
+                root_cause_identified=self._scenario._root_cause_identified,
+                info={"event": reward_event},
+            )
+        else:
+            # Delegate to active scenario
+            outcome = self._scenario.step(parsed)
         raw_step_reward = self._scenario.clamp_reward(outcome.reward)
         current_cumulative_reward = self._scenario.clamp_reward(
             self._scenario._cumulative_reward
@@ -190,6 +283,7 @@ class PraxisEnvironment:
 
         # Update scenario's investigation result for next observation
         self._scenario._last_investigation_result = outcome.investigation_result
+        self._investigation_history.append(outcome.investigation_result)
         self._scenario._step_count += 1
         self._scenario._cumulative_reward = next_cumulative_reward
 
@@ -197,8 +291,18 @@ class PraxisEnvironment:
         obs = self._scenario.get_observation()
         # Override step_number to reflect the step just taken
         obs.step_number = self._scenario._step_count
+        memory_active = self._memory.is_active(self._scenario._step_count)
+        if memory_active:
+            obs.investigation_result = self._memory.get_observation_context(
+                self._investigation_history,
+                self._scenario._step_count,
+            )
+        obs.memory_active = memory_active
+        obs.saved_findings_count = len(self._memory.saved_findings)
 
         info = dict(outcome.info or {})
+        if reward_event is not None:
+            info["event"] = reward_event
         if score_cap_reached:
             info["score_cap_reached"] = True
 
@@ -229,7 +333,10 @@ class PraxisEnvironment:
         """
         if self._scenario is None:
             raise RuntimeError("state() called before reset(). Call reset() first.")
-        return self._scenario.get_state()
+        state = self._scenario.get_state()
+        state.memory_active = self._memory.is_active(self._scenario._step_count)
+        state.session_id = self._session_id
+        return state
 
     def list_tasks(self) -> list[str]:
         """Return all available task names."""
@@ -247,4 +354,68 @@ class PraxisEnvironment:
             "severity": obs.severity,
             "services_affected": obs.services_affected,
             "step_number": obs.step_number,
+            "memory_active": obs.memory_active,
+            "saved_findings_count": obs.saved_findings_count,
         }
+
+    def _score_memory_event(self, event: str) -> float:
+        """Score memory event tags through the shared reward engine."""
+        if self._scenario is None:
+            raise RuntimeError("Cannot score memory event before reset().")
+        result = self._reward_engine.score(
+            task_name=self._scenario.NAME,
+            event=event,
+            step_number=self._scenario._step_count + 1,
+            max_steps=self._scenario.MAX_STEPS,
+            root_cause_identified=self._scenario._root_cause_identified,
+        )
+        return result.reward
+
+    def _handle_memory_action(
+        self,
+        action_type: str,
+        params: dict[str, str],
+    ) -> tuple[StepOutcome, str]:
+        """Execute a memory command and return deterministic outcome + event tag."""
+        if self._scenario is None:
+            raise RuntimeError("Cannot handle memory action before reset().")
+
+        cutoff_state = (
+            "after_cutoff"
+            if self._memory.is_active(self._scenario._step_count)
+            else "before_cutoff"
+        )
+
+        if action_type == "save_finding":
+            key = params.get("key", "").strip()
+            value = params.get("value", "").strip()
+            if not key or not value:
+                event = "invalid_input"
+                result_text = (
+                    "Invalid save_finding command.\n"
+                    "Expected: save_finding key=<key> value=<finding>"
+                )
+                reward = self._score_memory_event(event)
+            else:
+                event = f"memory.save_finding.{cutoff_state}"
+                result_text = self._memory.save_finding(key, value)
+                reward = self._score_memory_event(event)
+        else:
+            key = params.get("key")
+            has_findings = bool(self._memory.saved_findings)
+            if cutoff_state == "after_cutoff" and not has_findings:
+                event = "memory.empty_recall_after_cutoff"
+            else:
+                event = f"memory.recall_memory.{cutoff_state}"
+            result_text = self._memory.recall_memory(key=key)
+            reward = self._score_memory_event(event)
+
+        outcome = StepOutcome(
+            investigation_result=result_text,
+            reward=reward,
+            done=self._scenario.is_done(),
+            incident_resolved=self._scenario._incident_resolved,
+            root_cause_identified=self._scenario._root_cause_identified,
+            info={"event": event},
+        )
+        return outcome, event

@@ -9,6 +9,7 @@ Grammar:
 
 Special cases:
     - escalate: reason=<free text with spaces>
+    - save_finding: key=<key> value=<free text with spaces>
     - diagnose:  root_cause=<value with underscores or hyphens>
     - timerange: value like "5m", "15m" (kept as-is, not parsed to int)
 
@@ -37,6 +38,8 @@ KNOWN_ACTIONS: frozenset[str] = frozenset(
         "scale_resource",
         "kill_query",
         "escalate",
+        "save_finding",
+        "recall_memory",
     }
 )
 
@@ -48,6 +51,7 @@ def parse_command(raw: str) -> ParsedCommand:
     Handles:
     - Standard "key=value" pairs split by whitespace
     - "escalate reason=<free text>" — everything after "reason=" is the reason
+    - "save_finding key=<k> value=<free text>" — value captures remaining text
     - Empty or whitespace-only strings → empty ParsedCommand
     - Unknown action types → valid ParsedCommand with unknown action_type
 
@@ -94,6 +98,20 @@ def parse_command(raw: str) -> ParsedCommand:
         else:
             # No reason= key — treat whole remainder as reason
             params["reason"] = remainder.strip("'\"")
+        return ParsedCommand(action_type=action_type, params=params, raw=raw)
+
+    # Special case: save_finding key=<k> value=<free text>
+    # Value can include spaces, so parse with a regex anchored on value=
+    if action_type == "save_finding":
+        finding_match = re.search(
+            r"key=([^\s]+)\s+value=(.+)$", remainder, re.IGNORECASE
+        )
+        if finding_match:
+            params["key"] = finding_match.group(1).strip().strip("'\"")
+            params["value"] = finding_match.group(2).strip().strip("'\"")
+        else:
+            # Let environment-side validation reject malformed payloads
+            params = {}
         return ParsedCommand(action_type=action_type, params=params, raw=raw)
 
     # Standard key=value parsing for all other commands

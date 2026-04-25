@@ -28,6 +28,7 @@ DEFAULT_TASKS = [
     "cascading-failure",
     "ambiguous-incident",
     "memory-leak",
+    "cascading-platform-failure",
 ]
 
 MAX_STEPS_BY_TASK = {
@@ -35,6 +36,7 @@ MAX_STEPS_BY_TASK = {
     "cascading-failure": 20,
     "ambiguous-incident": 25,
     "memory-leak": 25,
+    "cascading-platform-failure": 120,
 }
 
 FALLBACK_COMMANDS = {
@@ -66,6 +68,20 @@ FALLBACK_COMMANDS = {
         "check_metrics service=worker metric=memory",
         "check_config service=worker",
         "diagnose root_cause=large_batch_size_oom",
+        "rollback_deploy service=worker",
+    ],
+    "cascading-platform-failure": [
+        "query_logs service=database timerange=15m",
+        "check_metrics service=database metric=connections",
+        "query_logs service=cdn timerange=15m",
+        "check_metrics service=cdn metric=tls_handshake_failures",
+        "query_logs service=worker timerange=15m",
+        "check_metrics service=worker metric=memory",
+        "diagnose root_cause=db_pool_corrupted",
+        "diagnose root_cause=cdn_tls_expired",
+        "diagnose root_cause=worker_memory_leak",
+        "scale_resource service=database resource=connection_pool",
+        "rollback_deploy service=cdn",
         "rollback_deploy service=worker",
     ],
 }

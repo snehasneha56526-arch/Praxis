@@ -12,6 +12,8 @@
 
 ## 1. Class contract
 
+Status: shipped in `praxis_env/memory.py` (Issue #3).
+
 ```python
 # praxis_env/memory.py
 from dataclasses import dataclass, field
@@ -39,6 +41,8 @@ class PraxisMemory:
 
 ## 2. Lifecycle
 
+Status: shipped in Issue #6 (`PraxisEnvironment` now owns memory command routing and cutoff rewriting).
+
 ```mermaid
 sequenceDiagram
     participant E as PraxisEnvironment
@@ -46,7 +50,7 @@ sequenceDiagram
     participant SC as Scenario
 
     Note over E: reset()
-    E->>M: PraxisMemory()  (or M.reset())
+    E->>M: PraxisMemory()  (constructed once in __init__)
     E->>SC: scenario.reset(episode_id)
 
     loop each step
@@ -60,6 +64,10 @@ sequenceDiagram
         else scenario action
             E->>SC: step(parsed)
         end
+        alt action in {query_logs, check_logs} and step >= cutoff
+            E->>E: emit memory.illegal_log_after_cutoff
+            E->>E: append [CONTEXT LIMIT] guardrail line
+        end
         E->>M: get_observation_context(history, step)
         M-->>E: full log slice OR cutoff message
     end
@@ -70,6 +78,8 @@ sequenceDiagram
 ---
 
 ## 3. Cutoff behaviour (the differentiator)
+
+Status: shipped in `praxis_env/memory.py::PraxisMemory.get_observation_context` (Issue #3).
 
 ```python
 def get_observation_context(self, full_log: list[str], step: int) -> str:
@@ -101,8 +111,11 @@ Memory events emit reward tags that every task policy maps to a number:
 | `memory.recall_memory.before_cutoff` | +0.01         | Tiny — discourages habitual recall.         |
 | `memory.recall_memory.after_cutoff`  | +0.08         | Strong: planning paid off.                  |
 | `memory.illegal_log_after_cutoff`    | −0.05         | Querying logs after cutoff (logs are gone). |
+| `memory.empty_recall_after_cutoff`   | −0.02         | Recall after cutoff with no saved findings. |
 
-These are added to **every task's** `event_values` so the memory tools work for all 6 scenarios. See [`RewardPolicy.md`](./RewardPolicy.md) for full per-task tables.
+These are added to **every task's** `event_values` so the memory tools work for all scenarios. See [`RewardPolicy.md`](./RewardPolicy.md) for full per-task tables.
+
+Cross-link: ADR-13 additionally enforces an evidence gate where `remediation.*` scores are zeroed until root-cause diagnosis is confirmed, preventing memory-assisted reward hacking before diagnosis.
 
 ---
 
@@ -144,6 +157,10 @@ AVAILABLE_COMMANDS = [
 ```
 
 So agents discovering the action space via the observation see the new tools without docs.
+
+Issue #2 also requires these commands to be advertised immediately on baseline observations,
+even before the memory hook rewrites `investigation_result`; `memory_active=false` and
+`saved_findings_count=0` are the safe defaults until cutoff logic is active.
 
 ---
 

@@ -63,13 +63,14 @@ class PraxisObservation(BaseModel):
 
 ```python
 class PraxisState(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
     episode_id: str
     step_count: int
     task_name: str
     incident_resolved: bool = False
     root_cause_identified: bool = False
     cumulative_reward: float = 0.01
-    session_id: str                     # NEW — links state to session
+    session_id: str = ""                # NEW — links state to session
     memory_active: bool = False         # NEW — mirrors observation
 ```
 

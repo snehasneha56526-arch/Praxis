@@ -10,6 +10,8 @@ Validates:
 """
 
 import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from praxis_env.models import (
     AVAILABLE_COMMANDS,
     VALID_METRICS,
@@ -17,6 +19,10 @@ from praxis_env.models import (
     PraxisObservation,
     PraxisState,
 )
+from server.app import app
+
+
+client = TestClient(app)
 
 
 class TestPraxisAction:
@@ -64,6 +70,8 @@ class TestPraxisObservation:
         assert hasattr(obs, "severity")
         assert hasattr(obs, "services_affected")
         assert hasattr(obs, "step_number")
+        assert hasattr(obs, "memory_active")
+        assert hasattr(obs, "saved_findings_count")
 
     def test_system_status_is_dict(self):
         obs = self._make_obs(system_status={"auth": "critical", "api": "healthy"})
@@ -76,6 +84,10 @@ class TestPraxisObservation:
     def test_services_affected_is_list(self):
         obs = self._make_obs()
         assert isinstance(obs.services_affected, list)
+
+    def test_rejects_unknown_fields(self):
+        with pytest.raises(ValidationError):
+            self._make_obs(unexpected_field="nope")
 
 
 class TestPraxisState:
@@ -98,6 +110,8 @@ class TestPraxisState:
         assert state.incident_resolved is False
         assert state.root_cause_identified is False
         assert state.cumulative_reward == pytest.approx(0.01)
+        assert state.session_id == ""
+        assert state.memory_active is False
 
     def test_all_fields_present(self):
         state = PraxisState(
@@ -107,10 +121,23 @@ class TestPraxisState:
             incident_resolved=True,
             root_cause_identified=True,
             cumulative_reward=0.65,
+            session_id="session_123",
+            memory_active=True,
         )
         assert state.incident_resolved is True
         assert state.root_cause_identified is True
         assert state.cumulative_reward == pytest.approx(0.65)
+        assert state.session_id == "session_123"
+        assert state.memory_active is True
+
+    def test_rejects_unknown_fields(self):
+        with pytest.raises(ValidationError):
+            PraxisState(
+                episode_id="ep_1",
+                step_count=1,
+                task_name="single-service-alert",
+                unexpected_field="nope",
+            )
 
 
 class TestConstants:
@@ -128,6 +155,8 @@ class TestConstants:
         assert "diagnose" in command_strs
         assert "escalate" in command_strs
         assert "rollback_deploy" in command_strs
+        assert "save_finding" in command_strs
+        assert "recall_memory" in command_strs
 
     def test_valid_metrics_not_empty(self):
         assert len(VALID_METRICS) > 0
@@ -136,3 +165,26 @@ class TestConstants:
         assert "error_rate" in VALID_METRICS
         assert "latency_p95" in VALID_METRICS
         assert "connections" in VALID_METRICS
+
+
+class TestSchemaEndpoint:
+    def test_schema_includes_memory_fields(self):
+        response = client.get("/schema")
+        assert response.status_code == 200
+
+        payload = response.json()
+        observation_props = payload["observation"]["properties"]
+        state_props = payload["state"]["properties"]
+
+        assert "memory_active" in observation_props
+        assert "saved_findings_count" in observation_props
+        assert "session_id" in state_props
+        assert "memory_active" in state_props
+
+    def test_schema_forbids_unknown_fields(self):
+        response = client.get("/schema")
+        assert response.status_code == 200
+
+        payload = response.json()
+        assert payload["observation"]["additionalProperties"] is False
+        assert payload["state"]["additionalProperties"] is False

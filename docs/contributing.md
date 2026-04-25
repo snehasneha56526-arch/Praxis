@@ -9,6 +9,7 @@ documentation cleanup all help.
 
 ```bash
 pip install -e ".[dev]"
+pre-commit install
 ```
 
 ---
@@ -124,6 +125,7 @@ class YourScenario(BaseScenario):
   derive that list from the current status map.
 - Do not mutate `_step_count` or `_cumulative_reward` inside scenario code.
 - Keep scenario text ASCII-friendly when practical.
+- Run `pre-commit run --all-files` before pushing.
 
 ---
 

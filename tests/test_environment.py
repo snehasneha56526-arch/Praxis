@@ -10,6 +10,7 @@ in Phases 3-5.
 """
 
 import pytest
+from praxis_env.scenarios.single_service_alert import SingleServiceAlertScenario
 from server.praxis_environment import PraxisEnvironment
 from praxis_env.models import PraxisAction
 
@@ -26,6 +27,7 @@ class TestPraxisEnvironmentInit:
         assert "single-service-alert" in tasks
         assert "cascading-failure" in tasks
         assert "ambiguous-incident" in tasks
+        assert "cascading-platform-failure" in tasks
 
     def test_step_before_reset_raises_runtime_error(self):
         env = PraxisEnvironment()
@@ -100,6 +102,49 @@ class TestCommandParserIntegration:
         assert cmd.params["reason"] == "everything is on fire please help"
 
 
+class TestMemoryHookIntegration:
+    def test_state_includes_session_id_from_reset(self):
+        env = PraxisEnvironment()
+        env.reset(task_name="single-service-alert", session_id="session-123")
+        state = env.state()
+        assert state.session_id == "session-123"
+        assert state.memory_active is False
+
+    def test_save_finding_is_routed_by_environment(self):
+        env = PraxisEnvironment()
+        env.reset(task_name="single-service-alert")
+        result = env.step(
+            PraxisAction(command="save_finding key=root_cause value=db_pool_exhausted")
+        )
+        assert result["info"]["event"] == "memory.save_finding.before_cutoff"
+        assert result["observation"]["saved_findings_count"] == 1
+        assert result["observation"]["memory_active"] is False
+
+    def test_cutoff_rewrite_and_illegal_log_penalty(self, monkeypatch):
+        monkeypatch.setattr(
+            SingleServiceAlertScenario, "MEMORY_CUTOFF_OVERRIDE", 1, raising=False
+        )
+        env = PraxisEnvironment()
+        env.reset(task_name="single-service-alert")
+
+        step1 = env.step(PraxisAction(command="save_finding key=rca value=bad_config"))
+        assert step1["observation"]["memory_active"] is True
+        assert (
+            "[CONTEXT LIMIT REACHED - Step 1/1]"
+            in step1["observation"]["investigation_result"]
+        )
+
+        step2 = env.step(PraxisAction(command="query_logs service=auth timerange=5m"))
+        assert step2["info"]["event"] == "memory.illegal_log_after_cutoff"
+        assert step2["reward"] == pytest.approx(0.01)
+        assert step2["observation"]["memory_active"] is True
+        assert step2["observation"]["saved_findings_count"] == 1
+        assert (
+            "[CONTEXT LIMIT REACHED - Step 2/1]"
+            in step2["observation"]["investigation_result"]
+        )
+
+
 class TestObsToDict:
     """Test the observation serialisation helper."""
 
@@ -128,6 +173,8 @@ class TestObsToDict:
             "severity",
             "services_affected",
             "step_number",
+            "memory_active",
+            "saved_findings_count",
         }
         assert required_keys == set(d.keys())
 
