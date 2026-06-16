@@ -128,6 +128,8 @@ class TestObsToDict:
             "severity",
             "services_affected",
             "step_number",
+            "memory_active",
+            "saved_findings_count",
         }
         assert required_keys == set(d.keys())
 

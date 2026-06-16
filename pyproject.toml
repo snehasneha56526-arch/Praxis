@@ -27,6 +27,7 @@ dev = [
     "httpx",
     "ruff",
     "mypy",
+    "pre-commit",
 ]
 
 [tool.setuptools.packages.find]

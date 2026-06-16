@@ -202,6 +202,7 @@ def _with_memory_events(events: Mapping[str, float]) -> Mapping[str, float]:
 
 - `RewardEngine.score()` returns a `RewardResult(reward, breakdown)` where `reward = clamp(sum(components), 0.01, 0.99)`.
 - Memory bonuses are added in the `investigation_reward` slot (positive) or `redundancy_penalty` slot (negative); they do **not** double-clamp before the final sum.
+- Per ADR-13, any `remediation.*` event is forced to zero pre-clamp when `root_cause_identified=False` so remediation cannot score before diagnosis.
 - Issue #5 acceptance criteria require: the test suite proves no policy exceeds `[0.01, 0.99]` over 1000 random sequences.
 
 ---
@@ -212,4 +213,5 @@ def _with_memory_events(events: Mapping[str, float]) -> Mapping[str, float]:
 - [ ] No event value is outside `[-0.20, +0.30]` pre-clamp (sanity bound).
 - [ ] `time_pressure_cost_per_step` is set per task as in §2/§3.
 - [ ] `clamp_reward` is applied exactly once at the boundary.
+- [ ] `remediation.*` events are zeroed when `root_cause_identified=False` (ADR-13 evidence gate).
 - [ ] `pytest -q tests/test_reward.py` and `tests/test_memory.py` pass.

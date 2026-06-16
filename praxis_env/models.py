@@ -10,7 +10,7 @@ Design Decisions:
   - No Optional where possible — every field should have a defined value
 """
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Any
 import unicodedata
 
@@ -101,6 +101,9 @@ class PraxisAction(BaseModel):
         scale_resource service=<name> resource=<type> [value=<N>]
         kill_query service=<name> query_id=<id>
         escalate reason=<text>
+        save_finding key=<key> value=<finding>
+        recall_memory
+        recall_memory key=<key>
 
     Example:
         PraxisAction(command="query_logs service=auth timerange=5m")
@@ -131,6 +134,8 @@ class PraxisObservation(BaseModel):
         step_number:            Current step count (0 on reset, increments with each step)
     """
 
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
     alert_summary: str
     system_status: dict[str, str]
     investigation_result: str
@@ -139,11 +144,18 @@ class PraxisObservation(BaseModel):
     severity: str
     services_affected: list[str]
     step_number: int
+    memory_active: bool = False
+    saved_findings_count: int = 0
 
     @model_validator(mode="after")
     def normalize_text(self) -> "PraxisObservation":
-        self.alert_summary = ensure_ascii_text(self.alert_summary)
-        self.investigation_result = ensure_ascii_text(self.investigation_result)
+        # Use object.__setattr__ to avoid validate_assignment re-entry loops.
+        object.__setattr__(self, "alert_summary", ensure_ascii_text(self.alert_summary))
+        object.__setattr__(
+            self,
+            "investigation_result",
+            ensure_ascii_text(self.investigation_result),
+        )
         return self
 
 
@@ -163,12 +175,16 @@ class PraxisState(BaseModel):
         cumulative_reward:      Sum of rewards so far (for monitoring only)
     """
 
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
     episode_id: str
     step_count: int
     task_name: str
     incident_resolved: bool = False
     root_cause_identified: bool = False
     cumulative_reward: float = 0.01
+    session_id: str = ""
+    memory_active: bool = False
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -187,6 +203,9 @@ AVAILABLE_COMMANDS: list[str] = [
     "scale_resource service=<name> resource=<type>",
     "kill_query service=<name> query_id=<id>",
     "escalate reason=<text>",
+    "save_finding key=<key> value=<finding>",
+    "recall_memory",
+    "recall_memory key=<key>",
 ]
 
 VALID_METRICS: frozenset[str] = frozenset(

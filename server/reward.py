@@ -87,6 +87,23 @@ class RewardPolicy:
     time_pressure_cost_per_step: float = 0.0
 
 
+_MEMORY_EVENTS: Mapping[str, float] = {
+    "memory.save_finding.before_cutoff": 0.05,
+    "memory.save_finding.after_cutoff": 0.02,
+    "memory.recall_memory.before_cutoff": 0.01,
+    "memory.recall_memory.after_cutoff": 0.08,
+    "memory.illegal_log_after_cutoff": -0.05,
+    "memory.empty_recall_after_cutoff": -0.02,
+}
+
+
+def _with_memory_events(events: Mapping[str, float]) -> dict[str, float]:
+    """Return a new event-value mapping with cross-task memory event rows."""
+    merged = dict(events)
+    merged.update(_MEMORY_EVENTS)
+    return merged
+
+
 # ── Reward Calibration ──────────────────────────────────────────────────────
 #
 # Each value is chosen to produce a target difficulty curve:
@@ -111,29 +128,31 @@ DEFAULT_REWARD_POLICIES: dict[str, RewardPolicy] = {
     # Generous investigation rewards so partial investigation is well-rewarded.
     # No step cost — the easy task is forgiving by design.
     "single-service-alert": RewardPolicy(
-        event_values={
-            # Investigation — generous for the easy task
-            "investigation.query_logs.auth": 0.08,  # key service
-            "investigation.query_logs.default": 0.05,  # exploring is okay
-            "investigation.check_metrics.connections": 0.08,
-            "investigation.check_metrics.default": 0.05,
-            "investigation.check_deps.default": 0.05,
-            "investigation.check_config.auth": 0.10,  # high-value: reveals the config typo
-            "investigation.check_config.default": 0.03,
-            "investigation.check_runbook.default": 0.05,  # consulting runbook is rewarded
-            # Diagnosis
-            "diagnosis.correct": 0.20,
-            "diagnosis.wrong": 0.0,
-            # Remediation
-            "remediation.rollback_deploy.auth": 0.25,  # correct fix = highest single reward
-            "remediation.wrong": 0.0,
-            # Escalation
-            "escalation.with_evidence": 0.15,
-            "escalation.no_evidence": 0.0,
-            # Error handling
-            "unknown_command": 0.0,
-            "invalid_input": 0.0,
-        },
+        event_values=_with_memory_events(
+            {
+                # Investigation — generous for the easy task
+                "investigation.query_logs.auth": 0.08,  # key service
+                "investigation.query_logs.default": 0.05,  # exploring is okay
+                "investigation.check_metrics.connections": 0.08,
+                "investigation.check_metrics.default": 0.05,
+                "investigation.check_deps.default": 0.05,
+                "investigation.check_config.auth": 0.10,  # high-value: reveals the config typo
+                "investigation.check_config.default": 0.03,
+                "investigation.check_runbook.default": 0.05,  # consulting runbook is rewarded
+                # Diagnosis
+                "diagnosis.correct": 0.20,
+                "diagnosis.wrong": 0.0,
+                # Remediation
+                "remediation.rollback_deploy.auth": 0.25,  # correct fix = highest single reward
+                "remediation.wrong": 0.0,
+                # Escalation
+                "escalation.with_evidence": 0.15,
+                "escalation.no_evidence": 0.0,
+                # Error handling
+                "unknown_command": 0.0,
+                "invalid_input": 0.0,
+            }
+        ),
         # Easy task: no step cost, mild penalties
         time_pressure_cost_per_step=0.0,
     ),
@@ -142,34 +161,36 @@ DEFAULT_REWARD_POLICIES: dict[str, RewardPolicy] = {
     # Investigation rewards are lower — must follow the dependency chain.
     # Stronger step cost penalizes wandering through red herrings.
     "cascading-failure": RewardPolicy(
-        event_values={
-            # Investigation — lower rewards, must multi-hop to find root cause
-            "investigation.query_logs.api": 0.03,  # symptom service, low value
-            "investigation.query_logs.database": 0.05,  # closer to root cause
-            "investigation.query_logs.analytics": 0.05,  # reveals the runaway query
-            "investigation.query_logs.default": 0.02,  # exploring other services
-            "investigation.check_metrics.database.connections": 0.08,  # key metric
-            "investigation.check_metrics.default": 0.02,
-            "investigation.check_deps.core": 0.03,  # reveals db dependency
-            "investigation.check_deps.default": 0.02,
-            "investigation.check_config.database": 0.03,
-            "investigation.check_config.analytics": 0.03,
-            "investigation.check_config.default": 0.02,
-            "investigation.check_runbook.default": 0.03,
-            # Diagnosis — moderate, must earn it through investigation
-            "diagnosis.correct": 0.14,
-            "diagnosis.wrong": 0.0,
-            # Remediation — both needed for full resolution
-            "remediation.kill_query.database": 0.09,  # stop the bleeding
-            "remediation.scale_resource.database.connection_pool": 0.08,  # prevent recurrence
-            "remediation.wrong": 0.0,
-            # Escalation
-            "escalation.with_evidence": 0.09,
-            "escalation.no_evidence": 0.0,
-            # Error handling
-            "unknown_command": 0.0,
-            "invalid_input": 0.0,
-        },
+        event_values=_with_memory_events(
+            {
+                # Investigation — lower rewards, must multi-hop to find root cause
+                "investigation.query_logs.api": 0.03,  # symptom service, low value
+                "investigation.query_logs.database": 0.05,  # closer to root cause
+                "investigation.query_logs.analytics": 0.05,  # reveals the runaway query
+                "investigation.query_logs.default": 0.02,  # exploring other services
+                "investigation.check_metrics.database.connections": 0.08,  # key metric
+                "investigation.check_metrics.default": 0.02,
+                "investigation.check_deps.core": 0.03,  # reveals db dependency
+                "investigation.check_deps.default": 0.02,
+                "investigation.check_config.database": 0.03,
+                "investigation.check_config.analytics": 0.03,
+                "investigation.check_config.default": 0.02,
+                "investigation.check_runbook.default": 0.03,
+                # Diagnosis — moderate, must earn it through investigation
+                "diagnosis.correct": 0.14,
+                "diagnosis.wrong": 0.0,
+                # Remediation — both needed for full resolution
+                "remediation.kill_query.database": 0.09,  # stop the bleeding
+                "remediation.scale_resource.database.connection_pool": 0.08,  # prevent recurrence
+                "remediation.wrong": 0.0,
+                # Escalation
+                "escalation.with_evidence": 0.09,
+                "escalation.no_evidence": 0.0,
+                # Error handling
+                "unknown_command": 0.0,
+                "invalid_input": 0.0,
+            }
+        ),
         # Hard task: stronger step cost discourages aimless exploration
         time_pressure_cost_per_step=0.006,
     ),
@@ -178,33 +199,35 @@ DEFAULT_REWARD_POLICIES: dict[str, RewardPolicy] = {
     # evidence correlation but with less harsh remediation pressure than
     # the hard tasks.
     "ambiguous-incident": RewardPolicy(
-        event_values={
-            # Investigation — must check 3+ app services + infra
-            "investigation.query_logs.app": 0.048,
-            "investigation.query_logs.dns-resolver": 0.095,
-            "investigation.query_logs.default": 0.028,
-            "investigation.check_metrics.dns-resolver.resolution_failures": 0.095,
-            "investigation.check_metrics.app": 0.028,
-            "investigation.check_metrics.load-balancer": 0.018,
-            "investigation.check_metrics.default": 0.018,
-            "investigation.check_deps.default": 0.028,
-            "investigation.check_config.dns-resolver": 0.045,
-            "investigation.check_config.app": 0.018,
-            "investigation.check_config.default": 0.01,
-            "investigation.check_runbook.default": 0.028,
-            # Diagnosis
-            "diagnosis.correct": 0.19,
-            "diagnosis.wrong": 0.0,
-            # Remediation
-            "remediation.restart_service.dns-resolver": 0.14,
-            "remediation.wrong": 0.0,
-            # Escalation
-            "escalation.with_evidence": 0.14,
-            "escalation.no_evidence": 0.0,
-            # Error handling
-            "unknown_command": 0.0,
-            "invalid_input": 0.0,
-        },
+        event_values=_with_memory_events(
+            {
+                # Investigation — must check 3+ app services + infra
+                "investigation.query_logs.app": 0.048,
+                "investigation.query_logs.dns-resolver": 0.095,
+                "investigation.query_logs.default": 0.028,
+                "investigation.check_metrics.dns-resolver.resolution_failures": 0.095,
+                "investigation.check_metrics.app": 0.028,
+                "investigation.check_metrics.load-balancer": 0.018,
+                "investigation.check_metrics.default": 0.018,
+                "investigation.check_deps.default": 0.028,
+                "investigation.check_config.dns-resolver": 0.045,
+                "investigation.check_config.app": 0.018,
+                "investigation.check_config.default": 0.01,
+                "investigation.check_runbook.default": 0.028,
+                # Diagnosis
+                "diagnosis.correct": 0.19,
+                "diagnosis.wrong": 0.0,
+                # Remediation
+                "remediation.restart_service.dns-resolver": 0.14,
+                "remediation.wrong": 0.0,
+                # Escalation
+                "escalation.with_evidence": 0.14,
+                "escalation.no_evidence": 0.0,
+                # Error handling
+                "unknown_command": 0.0,
+                "invalid_input": 0.0,
+            }
+        ),
         # Medium task: mild step cost
         time_pressure_cost_per_step=0.003,
     ),
@@ -212,30 +235,32 @@ DEFAULT_REWARD_POLICIES: dict[str, RewardPolicy] = {
     # Requires checking memory metrics and config to find the OOM cause.
     # Target optimal path: ~0.48 in 5 steps.
     "memory-leak": RewardPolicy(
-        event_values={
-            # Investigation
-            "investigation.query_logs.worker": 0.04,
-            "investigation.query_logs.default": 0.02,
-            "investigation.check_metrics.worker.memory": 0.09,
-            "investigation.check_metrics.default": 0.02,
-            "investigation.check_deps.default": 0.02,
-            "investigation.check_config.worker": 0.04,
-            "investigation.check_config.default": 0.02,
-            "investigation.check_runbook.default": 0.03,
-            # Diagnosis
-            "diagnosis.correct": 0.14,
-            "diagnosis.wrong": 0.0,
-            # Remediation
-            "remediation.rollback_deploy.worker": 0.19,
-            "remediation.scale_resource.worker.memory": 0.19,
-            "remediation.wrong": 0.0,
-            # Escalation
-            "escalation.with_evidence": 0.10,
-            "escalation.no_evidence": 0.0,
-            # Error handling
-            "unknown_command": 0.0,
-            "invalid_input": 0.0,
-        },
+        event_values=_with_memory_events(
+            {
+                # Investigation
+                "investigation.query_logs.worker": 0.04,
+                "investigation.query_logs.default": 0.02,
+                "investigation.check_metrics.worker.memory": 0.09,
+                "investigation.check_metrics.default": 0.02,
+                "investigation.check_deps.default": 0.02,
+                "investigation.check_config.worker": 0.04,
+                "investigation.check_config.default": 0.02,
+                "investigation.check_runbook.default": 0.03,
+                # Diagnosis
+                "diagnosis.correct": 0.14,
+                "diagnosis.wrong": 0.0,
+                # Remediation
+                "remediation.rollback_deploy.worker": 0.19,
+                "remediation.scale_resource.worker.memory": 0.19,
+                "remediation.wrong": 0.0,
+                # Escalation
+                "escalation.with_evidence": 0.10,
+                "escalation.no_evidence": 0.0,
+                # Error handling
+                "unknown_command": 0.0,
+                "invalid_input": 0.0,
+            }
+        ),
         time_pressure_cost_per_step=0.005,
     ),
 }
@@ -255,6 +280,7 @@ class RewardEngine:
         duplicate: bool = False,
         premature: bool = False,
         destructive: bool = False,
+        root_cause_identified: bool = True,
         resolved: bool = False,
         step_number: int = 1,
         max_steps: int = 1,
@@ -268,6 +294,7 @@ class RewardEngine:
             duplicate: True if this action repeats already-seen evidence.
             premature: True if action happened before evidence threshold.
             destructive: True for materially harmful wrong remediations.
+            root_cause_identified: Whether root cause was diagnosed already.
             resolved: True when this action resolves or ends the incident.
             step_number: 1-based action index for optional timing bonuses.
             max_steps: Episode step limit.
@@ -280,6 +307,13 @@ class RewardEngine:
                 f"Available policies: [{available}]"
             )
 
+        if event.startswith("remediation.") and not root_cause_identified:
+            breakdown = RewardBreakdown(total_unclamped=0.0)
+            return RewardResult(
+                reward=clamp_reward(breakdown.total_unclamped),
+                breakdown=breakdown,
+            )
+
         event_value = policy.event_values.get(event, 0.0)
         effective_value = 0.0 if duplicate else event_value
 
@@ -290,6 +324,8 @@ class RewardEngine:
         escalation_reward = 0.0
 
         if event.startswith("investigation."):
+            investigation_reward = effective_value
+        elif event.startswith("memory."):
             investigation_reward = effective_value
         elif event == "diagnosis.correct":
             diagnosis_reward = effective_value

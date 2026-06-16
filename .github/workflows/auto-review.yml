@@ -182,10 +182,18 @@ jobs:
               // GitHub forbids the bot from REQUEST_CHANGES on PR authors of repo admins;
               // fall back to a plain comment so the signal is still visible.
               core.warning(`createReview ${event} failed (${e.message}); falling back to comment`);
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                body: body,
-              });
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body: body,
+                });
+              } catch (commentError) {
+                // On fork-triggered pull_request runs, token permissions can block
+                // both review and issue-comment APIs. Keep CI green and surface context.
+                core.warning(
+                  `createComment failed (${commentError.message}); skipping bot comment due to token permissions`
+                );
+              }
             }

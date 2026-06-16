@@ -85,6 +85,28 @@ class TestParseCommand:
         assert cmd.action_type == "escalate"
         assert cmd.params.get("reason") == "something went very wrong"
 
+    # ── Memory actions ────────────────────────────────────────────────────────
+
+    def test_save_finding_free_text_value(self):
+        cmd = parse_command("save_finding key=db_pool value=exhausted at step 4")
+        assert cmd.action_type == "save_finding"
+        assert cmd.params == {"key": "db_pool", "value": "exhausted at step 4"}
+
+    def test_save_finding_bogus_without_value(self):
+        cmd = parse_command("save_finding key=db_pool exhausted at step 4")
+        assert cmd.action_type == "save_finding"
+        assert cmd.params == {}
+
+    def test_recall_memory_no_args(self):
+        cmd = parse_command("recall_memory")
+        assert cmd.action_type == "recall_memory"
+        assert cmd.params == {}
+
+    def test_recall_memory_with_key(self):
+        cmd = parse_command("recall_memory key=db_pool")
+        assert cmd.action_type == "recall_memory"
+        assert cmd.params == {"key": "db_pool"}
+
     # ── Edge cases ────────────────────────────────────────────────────────────
 
     def test_empty_string(self):
@@ -142,6 +164,8 @@ class TestIsKnownAction:
             "scale_resource",
             "kill_query",
             "escalate",
+            "save_finding",
+            "recall_memory",
         ]
         for action in known:
             assert is_known_action(action), f"{action} should be known"

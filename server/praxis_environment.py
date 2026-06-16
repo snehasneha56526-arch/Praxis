@@ -247,4 +247,6 @@ class PraxisEnvironment:
             "severity": obs.severity,
             "services_affected": obs.services_affected,
             "step_number": obs.step_number,
+            "memory_active": obs.memory_active,
+            "saved_findings_count": obs.saved_findings_count,
         }
